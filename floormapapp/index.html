@@ -866,6 +866,7 @@ input[type=date]::-webkit-calendar-picker-indicator{filter:invert(.5)}
           <button class="admin-tab" onclick="switchAdminTab('analytics')">Analytics</button>
           <button class="admin-tab" onclick="switchAdminTab('password')">Password</button>
           <button class="admin-tab" onclick="switchAdminTab('addEvent')">+ Add</button>
+          <button class="admin-tab" onclick="switchAdminTab('linkImport')" style="color:#00c9a7">📘 Link Import</button>
           <button class="admin-tab" onclick="switchAdminTab('aiSearch')" style="color:#00c9a7">🤖 AI Search</button>
         </div>
 
@@ -891,6 +892,17 @@ input[type=date]::-webkit-calendar-picker-indicator{filter:invert(.5)}
           <div class="adm-field-group"><label class="adm-label">Privacy Policy URL</label><input class="adm-input" id="cfg_privacy" placeholder="https://floormapapp.nl/privacy"></div>
           <div class="adm-field-group"><label class="adm-label">Instagram URL</label><input class="adm-input" id="cfg_instagram" placeholder="https://instagram.com/floormapapp"></div>
           <div class="adm-field-group"><label class="adm-label">Facebook URL</label><input class="adm-input" id="cfg_facebook" placeholder="https://facebook.com/floormapapp"></div>
+          <!-- API KEY -->
+          <div style="font-family:'DM Mono',monospace;font-size:.65rem;color:#00c9a7;letter-spacing:.1em;text-transform:uppercase;margin:.85rem 0 .5rem">🤖 AI Features</div>
+          <div style="font-size:.78rem;color:var(--muted);margin-bottom:.75rem;line-height:1.5">Required for Link Import and AI Event Search. Get your key at <strong style="color:#00c9a7">console.anthropic.com</strong></div>
+          <div class="adm-field-group"><label class="adm-label">Anthropic API Key</label>
+            <div style="position:relative">
+              <input class="adm-input" id="cfg_apiKey" type="password" placeholder="sk-ant-api03-..." style="padding-right:3rem">
+              <button onclick="toggleApiKeyVisibility()" style="position:absolute;right:.5rem;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--muted);cursor:pointer;font-size:.8rem" id="apiKeyToggle">👁</button>
+            </div>
+            <div style="font-family:'DM Mono',monospace;font-size:.6rem;color:var(--muted);margin-top:.3rem">Saved locally on this device only. Never shared.</div>
+          </div>
+          <!-- PAYMENT -->
           <div style="font-family:'DM Mono',monospace;font-size:.65rem;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin:.75rem 0 .5rem">Payment Settings</div>
           <div class="adm-field-group"><label class="adm-label">Free Period (months)</label><input class="adm-input" id="cfg_freeMonths" type="number" value="2"></div>
           <div class="adm-field-group"><label class="adm-label">Posting Fee (€)</label><input class="adm-input" id="cfg_fee" type="number" value="5"></div>
@@ -1021,6 +1033,63 @@ input[type=date]::-webkit-calendar-picker-indicator{filter:invert(.5)}
           <div class="adm-field-group"><label class="adm-label">Image URL</label><input class="adm-input" id="ae-image" placeholder="https://..."></div>
           <div class="adm-field-group"><label class="adm-label">Ticket Link</label><input class="adm-input" id="ae-ticket" placeholder="https://..."></div>
           <button class="adm-save-btn" onclick="adminAddEvent()" style="width:100%;padding:.65rem">Add Event</button>
+        </div>
+
+        <!-- LINK IMPORT TAB -->
+        <div class="admin-section" id="admTab-linkImport">
+          <div class="adm-section-title" style="color:#00c9a7;border-color:rgba(0,201,167,.2)">📘 Import Event from Link</div>
+          <div style="font-size:.82rem;color:var(--muted);margin-bottom:1.1rem;line-height:1.55">Paste any event link — Facebook, Eventbrite, latinworld.nl, or any website. Claude reads it and fills in all the event details. You review, edit if needed, then save to Pending.</div>
+
+          <!-- API KEY WARNING (shown when no key set) -->
+          <div id="linkImportKeyWarning" style="display:none;background:rgba(232,70,74,.1);border:1px solid rgba(232,70,74,.3);border-radius:10px;padding:.85rem 1rem;margin-bottom:1rem;font-size:.82rem;color:#e84040;line-height:1.5">
+            ⚠ No API key set. Go to <strong>Settings tab</strong> → Anthropic API Key and paste your key from <strong>console.anthropic.com</strong>
+          </div>
+
+          <!-- URL INPUT -->
+          <div class="adm-field-group">
+            <label class="adm-label">Event URL</label>
+            <input class="adm-input" id="linkImportUrl" type="url" placeholder="https://www.facebook.com/events/... or any event page">
+          </div>
+          <button class="adm-save-btn" id="linkImportBtn" onclick="runLinkImport()" style="width:100%;padding:.75rem;background:linear-gradient(135deg,#1877f2,#00c9a7);font-size:.92rem;margin-bottom:.75rem">🔍 Read Event from Link</button>
+          <div id="linkImportStatus" style="font-family:'DM Mono',monospace;font-size:.72rem;color:var(--muted);text-align:center;margin-bottom:.75rem;line-height:1.5"></div>
+
+          <!-- EDITABLE RESULT FORM (hidden until Claude responds) -->
+          <div id="linkImportForm" style="display:none">
+            <div style="background:rgba(0,201,167,.06);border:1px solid rgba(0,201,167,.2);border-radius:12px;padding:1rem;margin-bottom:1rem">
+              <div style="font-family:'DM Mono',monospace;font-size:.65rem;color:#00c9a7;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.75rem">✓ Event Details Found — Review &amp; Edit</div>
+              <div class="adm-field-group"><label class="adm-label">Event Name ★</label><input class="adm-input" id="li_name" placeholder="Event name"></div>
+              <div class="adm-field-group"><label class="adm-label">Dance Style</label>
+                <select class="adm-input" id="li_style">
+                  <option value="Kizomba">Kizomba</option>
+                  <option value="Salsa">Salsa</option>
+                  <option value="Bachata">Bachata</option>
+                  <option value="Urban Kiz">Urban Kiz</option>
+                  <option value="Zouk">Zouk</option>
+                  <option value="Tango">Tango</option>
+                  <option value="Semba">Semba</option>
+                  <option value="Latin">Latin</option>
+                  <option value="Afro House">Afro House</option>
+                </select>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
+                <div class="adm-field-group"><label class="adm-label">Date (YYYY-MM-DD)</label><input class="adm-input" id="li_date" type="date"></div>
+                <div class="adm-field-group"><label class="adm-label">Time</label><input class="adm-input" id="li_time" type="time"></div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
+                <div class="adm-field-group"><label class="adm-label">City</label><input class="adm-input" id="li_city" placeholder="Amsterdam"></div>
+                <div class="adm-field-group"><label class="adm-label">Venue</label><input class="adm-input" id="li_venue" placeholder="Venue name"></div>
+              </div>
+              <div class="adm-field-group"><label class="adm-label">Address</label><input class="adm-input" id="li_address" placeholder="Full address"></div>
+              <div class="adm-field-group"><label class="adm-label">Promoter / Organiser</label><input class="adm-input" id="li_promoter" placeholder="Organiser name"></div>
+              <div class="adm-field-group"><label class="adm-label">Description</label><textarea class="adm-input" id="li_desc" style="min-height:70px;resize:vertical" placeholder="Short description"></textarea></div>
+              <div class="adm-field-group"><label class="adm-label">Ticket Link</label><input class="adm-input" id="li_ticket" type="url" placeholder="https://..."></div>
+              <div class="adm-field-group"><label class="adm-label">Facebook Event Link</label><input class="adm-input" id="li_fb" type="url" placeholder="https://facebook.com/events/..."></div>
+            </div>
+            <div style="display:flex;gap:.5rem">
+              <button class="adm-save-btn" onclick="saveLinkImportToPending()" style="flex:2;padding:.75rem;font-size:.92rem">✓ Save to Pending</button>
+              <button class="adm-save-btn" onclick="resetLinkImport()" style="flex:1;background:var(--surface);border:1px solid var(--border);padding:.75rem">✕ Clear</button>
+            </div>
+          </div>
         </div>
 
         <!-- AI SEARCH TAB -->
@@ -2287,7 +2356,161 @@ If you cannot find specific details, leave that field as an empty string. Do not
 }
 
 
-// ══ HEADER ══
+// ══ LINK IMPORT (standalone, uses API key from Settings) ══
+async function runLinkImport() {
+  const url = document.getElementById('linkImportUrl').value.trim();
+  const statusEl = document.getElementById('linkImportStatus');
+  const btn = document.getElementById('linkImportBtn');
+  const formEl = document.getElementById('linkImportForm');
+  const warningEl = document.getElementById('linkImportKeyWarning');
+
+  // Check API key
+  const apiKey = localStorage.getItem('fm_apikey') || '';
+  if (!apiKey) {
+    warningEl.style.display = 'block';
+    return;
+  }
+  warningEl.style.display = 'none';
+
+  if (!url) { statusEl.textContent = '⚠ Please paste an event URL first'; return; }
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Reading event...';
+  statusEl.textContent = 'Claude is reading the event page...';
+  formEl.style.display = 'none';
+
+  const prompt = `Read this event page and extract all available event details: ${url}
+
+If you cannot access the page directly, search the web for this URL to find cached or referenced information about it.
+
+Return ONLY a single JSON object (no array, no markdown, no explanation before or after):
+{
+  "name": "Full event name",
+  "style": "One of: Salsa, Bachata, Kizomba, Urban Kiz, Zouk, Tango, Latin, Semba, Afro House",
+  "date": "YYYY-MM-DD",
+  "time": "HH:MM",
+  "city": "City name",
+  "venue": "Venue or location name",
+  "address": "Full street address",
+  "desc": "Short description max 200 characters",
+  "promoter": "Organiser or event page name",
+  "ticket": "Ticket URL or empty string",
+  "fb": "Facebook event URL or empty string"
+}
+Leave fields as empty string if not found. Do not invent information.`;
+
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+
+    if (response.status === 401) {
+      statusEl.textContent = '⚠ Invalid API key. Check Settings → Anthropic API Key.';
+      btn.disabled = false; btn.textContent = '🔍 Read Event from Link';
+      return;
+    }
+
+    const data = await response.json();
+    const textContent = (data.content || [])
+      .filter(b => b.type === 'text')
+      .map(b => b.text)
+      .join('');
+
+    let ev = null;
+    try {
+      const objMatch = textContent.match(/\{[\s\S]*\}/);
+      if (objMatch) ev = JSON.parse(objMatch[0]);
+    } catch(e) {
+      statusEl.textContent = '⚠ Could not read event details. Try a different URL.';
+      btn.disabled = false; btn.textContent = '🔍 Read Event from Link';
+      return;
+    }
+
+    if (!ev || !ev.name) {
+      statusEl.textContent = '⚠ No event details found at this URL. Try another link.';
+      btn.disabled = false; btn.textContent = '🔍 Read Event from Link';
+      return;
+    }
+
+    // Fill in the editable form
+    document.getElementById('li_name').value = ev.name || '';
+    // Set style dropdown
+    const styleEl = document.getElementById('li_style');
+    for (let opt of styleEl.options) {
+      if (opt.value.toLowerCase() === (ev.style || '').toLowerCase()) { styleEl.value = opt.value; break; }
+    }
+    document.getElementById('li_date').value = ev.date || '';
+    document.getElementById('li_time').value = ev.time || '';
+    document.getElementById('li_city').value = ev.city || '';
+    document.getElementById('li_venue').value = ev.venue || '';
+    document.getElementById('li_address').value = ev.address || '';
+    document.getElementById('li_promoter').value = ev.promoter || '';
+    document.getElementById('li_desc').value = ev.desc || '';
+    document.getElementById('li_ticket').value = ev.ticket || '';
+    document.getElementById('li_fb').value = ev.fb || url;
+
+    formEl.style.display = 'block';
+    statusEl.textContent = '✓ Event details found. Review and edit below, then save to Pending.';
+    statusEl.style.color = '#00c9a7';
+
+  } catch(err) {
+    statusEl.textContent = '⚠ Request failed — check your API key and internet connection.';
+    console.error('Link import error:', err);
+  }
+
+  btn.disabled = false;
+  btn.textContent = '🔍 Read Event from Link';
+}
+
+function saveLinkImportToPending() {
+  const name = document.getElementById('li_name').value.trim();
+  if (!name) { admToast('⚠ Event name is required'); return; }
+
+  const newEv = {
+    id: 'li' + Date.now(),
+    name,
+    style: document.getElementById('li_style').value || 'Kizomba',
+    date: document.getElementById('li_date').value || '',
+    time: document.getElementById('li_time').value || '',
+    city: document.getElementById('li_city').value || '',
+    venue: document.getElementById('li_venue').value || '',
+    address: document.getElementById('li_address').value || '',
+    desc: document.getElementById('li_desc').value || '',
+    promoter: document.getElementById('li_promoter').value || '',
+    image: '',
+    ticket: document.getElementById('li_ticket').value || '',
+    fb: document.getElementById('li_fb').value || '',
+    status: 'pending'
+  };
+
+  pending.push(newEv);
+  localStorage.setItem('fm_pending', JSON.stringify(pending));
+  const badge = document.getElementById('pendingBadge');
+  if (badge) badge.textContent = pending.length || '';
+  admToast(`✓ "${newEv.name}" saved to Pending`);
+  resetLinkImport();
+}
+
+function resetLinkImport() {
+  document.getElementById('linkImportUrl').value = '';
+  document.getElementById('linkImportStatus').textContent = '';
+  document.getElementById('linkImportStatus').style.color = '';
+  document.getElementById('linkImportForm').style.display = 'none';
+  ['li_name','li_date','li_time','li_city','li_venue','li_address','li_promoter','li_desc','li_ticket','li_fb'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+}
 function toggleFmMenu() {
   const m = document.getElementById('fmMenu');
   m.classList.toggle('open');
@@ -2954,6 +3177,12 @@ function switchAdminTab(tab) {
   if (tab === 'analytics') renderAdmAnalytics();
   if (tab === 'password') {}
   if (tab === 'aiSearch') {}
+  if (tab === 'linkImport') {
+    // Check API key and show warning if missing
+    const hasKey = !!localStorage.getItem('fm_apikey');
+    const w = document.getElementById('linkImportKeyWarning');
+    if (w) w.style.display = hasKey ? 'none' : 'block';
+  }
 }
 
 // ══ USERS ══
@@ -3236,6 +3465,9 @@ function saveSettings() {
     feeEnabled: document.getElementById('cfg_feeEnabled').checked,
   };
   localStorage.setItem('fm_settings', JSON.stringify(cfg));
+  // Save API key separately (never in the general settings object)
+  const apiKey = document.getElementById('cfg_apiKey').value.trim();
+  if (apiKey) localStorage.setItem('fm_apikey', apiKey);
   admToast('Settings saved ✓');
 }
 function loadSettings() {
@@ -3252,6 +3484,10 @@ function loadSettings() {
     if (cfg.fee) document.getElementById('cfg_fee').value = cfg.fee;
     if (cfg.feeEnabled) document.getElementById('cfg_feeEnabled').checked = cfg.feeEnabled;
   } catch(e) {}
+  // Load API key
+  const storedKey = localStorage.getItem('fm_apikey') || '';
+  const keyEl = document.getElementById('cfg_apiKey');
+  if (keyEl && storedKey) keyEl.value = storedKey;
   try {
     const txt = JSON.parse(localStorage.getItem('fm_texts') || '{}');
     if (txt.findEvent) document.getElementById('txt_findEvent').value = txt.findEvent;
@@ -3260,6 +3496,12 @@ function loadSettings() {
     if (txt.promote) document.getElementById('txt_promote').value = txt.promote;
     if (txt.promoteSub) document.getElementById('txt_promoteSub').value = txt.promoteSub;
   } catch(e) {}
+}
+function toggleApiKeyVisibility() {
+  const el = document.getElementById('cfg_apiKey');
+  const btn = document.getElementById('apiKeyToggle');
+  if (el.type === 'password') { el.type = 'text'; btn.textContent = '🙈'; }
+  else { el.type = 'password'; btn.textContent = '👁'; }
 }
 function clearAllData() {
   if (!confirm('Reset ALL data? This clears events, contacts, pending submissions. Cannot be undone.')) return;
