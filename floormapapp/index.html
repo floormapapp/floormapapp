@@ -2666,7 +2666,7 @@ function buildEventCard(ev) {
   const placeholder = `<div class="event-flyer-placeholder" style="${imgSrc?'display:none':''}">🎵</div>`;
 
   return `
-  <div class="event-card" onclick="openEventDetail('${ev.id}')">
+  <div class="event-card" id="card-${ev.id}" onclick="openEventDetail('${ev.id}')">
     <div class="event-flyer">
       ${imgHtml}${placeholder}
       ${!ev.image ? `<div class="event-flyer-name">${ev.name}</div>` : ''}
@@ -3148,8 +3148,26 @@ function openAdmin() {
   document.getElementById('adminOverlay').classList.add('open');
 }
 function closeAdmin(e) {
-  if (!e || e.target === document.getElementById('adminOverlay'))
-    document.getElementById('adminOverlay').classList.remove('open');
+  if (e && e.target !== document.getElementById('adminOverlay') && !e.target.classList.contains('admin-close')) return;
+  document.getElementById('adminOverlay').classList.remove('open');
+
+  // If an event was just approved, scroll to it
+  if (window._lastApprovedEventId) {
+    setTimeout(() => {
+      const card = document.getElementById('card-' + window._lastApprovedEventId);
+      if (card) {
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Flash highlight so user sees which event was added
+        card.style.transition = 'box-shadow .3s';
+        card.style.boxShadow = '0 0 0 3px var(--accent), 0 8px 32px rgba(255,107,53,.4)';
+        setTimeout(() => { card.style.boxShadow = ''; }, 2500);
+      } else {
+        // Card not visible (filtered out) — scroll to events section
+        document.getElementById('eventsContainer').scrollIntoView({ behavior: 'smooth' });
+      }
+      window._lastApprovedEventId = null;
+    }, 300);
+  }
 }
 function unlockAdmin() {
   if (document.getElementById('adminPwInput').value === adminPassword) {
@@ -3373,14 +3391,17 @@ function approveEvent(i) {
   delete ev.status;
   ev.id = 'a' + Date.now();
   events.push(ev);
-  pending.splice(i,1);
+  pending.splice(i, 1);
   saveEvents();
   localStorage.setItem('fm_pending', JSON.stringify(pending));
   renderEvents();
   renderAdmPending();
   const b = document.getElementById('pendingBadge');
   if (b) b.textContent = pending.length || '';
-  admToast('✓ Event approved & published');
+  admToast('✓ Event approved & live!');
+
+  // Store the new event id so we can scroll to it when admin closes
+  window._lastApprovedEventId = ev.id;
 }
 function rejectEvent(i) {
   if (!confirm('Reject and delete this submission?')) return;
