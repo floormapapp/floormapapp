@@ -126,6 +126,8 @@ body::after{content:'';position:fixed;inset:0;background-image:url("data:image/s
 .style-list-item:hover,.style-list-item.active{background:rgba(255,107,53,.15);color:var(--accent)}
 .btn-find{width:100%;background:var(--surface);border:1px solid rgba(255,255,255,.15);border-radius:10px;padding:.82rem;color:#fff;font-family:'Syne',sans-serif;font-size:.95rem;font-weight:700;cursor:pointer;transition:all .2s;margin-top:.5rem}
 .btn-find:hover{background:var(--accent);border-color:var(--accent)}
+.btn-cancel-find{width:100%;background:none;border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:.65rem;color:var(--muted);font-family:'Syne',sans-serif;font-size:.85rem;font-weight:700;cursor:pointer;transition:all .2s;margin-top:.5rem}
+.btn-cancel-find:hover{border-color:rgba(255,255,255,.25);color:var(--text)}
 
 /* LEARN DANCE */
 .level-pills{display:flex;gap:.5rem;margin-bottom:1.25rem;flex-wrap:wrap}
@@ -475,6 +477,7 @@ body::after{content:'';position:fixed;inset:0;background-image:url("data:image/s
 .hidden{display:none!important}
 input[type=date]::-webkit-calendar-picker-indicator{filter:invert(.5)}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 
@@ -624,6 +627,7 @@ input[type=date]::-webkit-calendar-picker-indicator{filter:invert(.5)}
           <div class="style-list-item" onclick="selectFindStyle(this,'Latin')">Latin</div>
         </div>
         <button class="btn-find" onclick="applyEventFilter()">Find Events</button>
+        <button class="btn-cancel-find" onclick="cancelFindEvent()">✕ Cancel</button>
       </div>
     </div>
 
@@ -863,6 +867,7 @@ input[type=date]::-webkit-calendar-picker-indicator{filter:invert(.5)}
           <button class="admin-tab" onclick="switchAdminTab('analytics')">Analytics</button>
           <button class="admin-tab" onclick="switchAdminTab('password')">Password</button>
           <button class="admin-tab" onclick="switchAdminTab('addEvent')">+ Add</button>
+          <button class="admin-tab" onclick="switchAdminTab('linkImport')" style="color:#00c9a7">📘 Link Import</button>
           <button class="admin-tab" onclick="switchAdminTab('aiSearch')" style="color:#00c9a7">🤖 AI Search</button>
         </div>
 
@@ -888,6 +893,17 @@ input[type=date]::-webkit-calendar-picker-indicator{filter:invert(.5)}
           <div class="adm-field-group"><label class="adm-label">Privacy Policy URL</label><input class="adm-input" id="cfg_privacy" placeholder="https://floormapapp.nl/privacy"></div>
           <div class="adm-field-group"><label class="adm-label">Instagram URL</label><input class="adm-input" id="cfg_instagram" placeholder="https://instagram.com/floormapapp"></div>
           <div class="adm-field-group"><label class="adm-label">Facebook URL</label><input class="adm-input" id="cfg_facebook" placeholder="https://facebook.com/floormapapp"></div>
+          <!-- API KEY -->
+          <div style="font-family:'DM Mono',monospace;font-size:.65rem;color:#00c9a7;letter-spacing:.1em;text-transform:uppercase;margin:.85rem 0 .5rem">🤖 AI Features</div>
+          <div style="font-size:.78rem;color:var(--muted);margin-bottom:.75rem;line-height:1.5">Required for Link Import and AI Event Search. Get your key at <strong style="color:#00c9a7">console.anthropic.com</strong></div>
+          <div class="adm-field-group"><label class="adm-label">Anthropic API Key</label>
+            <div style="position:relative">
+              <input class="adm-input" id="cfg_apiKey" type="password" placeholder="sk-ant-api03-..." style="padding-right:3rem">
+              <button onclick="toggleApiKeyVisibility()" style="position:absolute;right:.5rem;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--muted);cursor:pointer;font-size:.8rem" id="apiKeyToggle">👁</button>
+            </div>
+            <div style="font-family:'DM Mono',monospace;font-size:.6rem;color:var(--muted);margin-top:.3rem">Saved locally on this device only. Never shared.</div>
+          </div>
+          <!-- PAYMENT -->
           <div style="font-family:'DM Mono',monospace;font-size:.65rem;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin:.75rem 0 .5rem">Payment Settings</div>
           <div class="adm-field-group"><label class="adm-label">Free Period (months)</label><input class="adm-input" id="cfg_freeMonths" type="number" value="2"></div>
           <div class="adm-field-group"><label class="adm-label">Posting Fee (€)</label><input class="adm-input" id="cfg_fee" type="number" value="5"></div>
@@ -1020,10 +1036,86 @@ input[type=date]::-webkit-calendar-picker-indicator{filter:invert(.5)}
           <button class="adm-save-btn" onclick="adminAddEvent()" style="width:100%;padding:.65rem">Add Event</button>
         </div>
 
+        <!-- LINK IMPORT TAB -->
+        <div class="admin-section" id="admTab-linkImport">
+          <div class="adm-section-title" style="color:#00c9a7;border-color:rgba(0,201,167,.2)">📘 Import Event from Link</div>
+          <div style="font-size:.82rem;color:var(--muted);margin-bottom:1.1rem;line-height:1.55">Paste any event link — Facebook, Eventbrite, latinworld.nl, or any website. Claude reads it and fills in all the event details. You review, edit if needed, then save to Pending.</div>
+
+          <!-- API KEY WARNING (shown when no key set) -->
+          <div id="linkImportKeyWarning" style="display:none;background:rgba(232,70,74,.1);border:1px solid rgba(232,70,74,.3);border-radius:10px;padding:.85rem 1rem;margin-bottom:1rem;font-size:.82rem;color:#e84040;line-height:1.5">
+            ⚠ No API key set. Go to <strong>Settings tab</strong> → Anthropic API Key and paste your key from <strong>console.anthropic.com</strong>
+          </div>
+
+          <!-- URL INPUT -->
+          <div class="adm-field-group">
+            <label class="adm-label">Event URL</label>
+            <input class="adm-input" id="linkImportUrl" type="url" placeholder="https://www.facebook.com/events/... or any event page">
+          </div>
+          <button class="adm-save-btn" id="linkImportBtn" onclick="runLinkImport()" style="width:100%;padding:.75rem;background:linear-gradient(135deg,#1877f2,#00c9a7);font-size:.92rem;margin-bottom:.75rem">🔍 Read Event from Link</button>
+          <div id="linkImportStatus" style="font-family:'DM Mono',monospace;font-size:.72rem;color:var(--muted);text-align:center;margin-bottom:.75rem;line-height:1.5"></div>
+
+          <!-- EDITABLE RESULT FORM (hidden until Claude responds) -->
+          <div id="linkImportForm" style="display:none">
+            <div style="background:rgba(0,201,167,.06);border:1px solid rgba(0,201,167,.2);border-radius:12px;padding:1rem;margin-bottom:1rem">
+              <div style="font-family:'DM Mono',monospace;font-size:.65rem;color:#00c9a7;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.75rem">✓ Event Details Found — Review &amp; Edit</div>
+              <div class="adm-field-group"><label class="adm-label">Event Name ★</label><input class="adm-input" id="li_name" placeholder="Event name"></div>
+              <div class="adm-field-group"><label class="adm-label">Dance Style</label>
+                <select class="adm-input" id="li_style">
+                  <option value="Kizomba">Kizomba</option>
+                  <option value="Salsa">Salsa</option>
+                  <option value="Bachata">Bachata</option>
+                  <option value="Urban Kiz">Urban Kiz</option>
+                  <option value="Zouk">Zouk</option>
+                  <option value="Tango">Tango</option>
+                  <option value="Semba">Semba</option>
+                  <option value="Latin">Latin</option>
+                  <option value="Afro House">Afro House</option>
+                </select>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
+                <div class="adm-field-group"><label class="adm-label">Date (YYYY-MM-DD)</label><input class="adm-input" id="li_date" type="date"></div>
+                <div class="adm-field-group"><label class="adm-label">Time</label><input class="adm-input" id="li_time" type="time"></div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
+                <div class="adm-field-group"><label class="adm-label">City</label><input class="adm-input" id="li_city" placeholder="Amsterdam"></div>
+                <div class="adm-field-group"><label class="adm-label">Venue</label><input class="adm-input" id="li_venue" placeholder="Venue name"></div>
+              </div>
+              <div class="adm-field-group"><label class="adm-label">Address</label><input class="adm-input" id="li_address" placeholder="Full address"></div>
+              <div class="adm-field-group"><label class="adm-label">Promoter / Organiser</label><input class="adm-input" id="li_promoter" placeholder="Organiser name"></div>
+              <div class="adm-field-group"><label class="adm-label">Description</label><textarea class="adm-input" id="li_desc" style="min-height:70px;resize:vertical" placeholder="Short description"></textarea></div>
+              <div class="adm-field-group"><label class="adm-label">Ticket Link</label><input class="adm-input" id="li_ticket" type="url" placeholder="https://..."></div>
+              <div class="adm-field-group"><label class="adm-label">Facebook Event Link</label><input class="adm-input" id="li_fb" type="url" placeholder="https://facebook.com/events/..."></div>
+            </div>
+            <div style="display:flex;gap:.5rem">
+              <button class="adm-save-btn" onclick="saveLinkImportToPending()" style="flex:2;padding:.75rem;font-size:.92rem">✓ Save to Pending</button>
+              <button class="adm-save-btn" onclick="resetLinkImport()" style="flex:1;background:var(--surface);border:1px solid var(--border);padding:.75rem">✕ Clear</button>
+            </div>
+          </div>
+        </div>
+
         <!-- AI SEARCH TAB -->
         <div class="admin-section" id="admTab-aiSearch">
           <div style="font-family:'DM Mono',monospace;font-size:.65rem;color:#00c9a7;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.5rem">🤖 AI Event Search</div>
           <div style="font-size:.78rem;color:var(--muted);margin-bottom:1rem;line-height:1.5">Uses Claude AI to search the web for upcoming Dutch dance events. Found events go to Pending for your review.</div>
+
+          <!-- FACEBOOK URL IMPORT -->
+          <div style="background:rgba(0,201,167,.06);border:1px solid rgba(0,201,167,.25);border-radius:12px;padding:1rem;margin-bottom:1.25rem">
+            <div class="adm-section-title" style="color:#00c9a7;border-color:rgba(0,201,167,.2)">📘 Import from Facebook Event URL</div>
+            <div style="font-size:.78rem;color:var(--muted);margin-bottom:.75rem;line-height:1.5">Paste a Facebook event link and Claude will extract all event details and add it to Pending.</div>
+            <div class="adm-field-group">
+              <label class="adm-label" style="color:#00c9a7">Facebook Event URL</label>
+              <input class="adm-input" id="fbImportUrl" type="url" placeholder="https://www.facebook.com/events/...">
+            </div>
+            <button class="adm-save-btn" id="fbImportBtn" onclick="importFacebookEvent()" style="width:100%;padding:.65rem;background:linear-gradient(135deg,#1877f2,#00c9a7);font-size:.88rem">📘 Import This Event</button>
+            <div id="fbImportStatus" style="font-family:'DM Mono',monospace;font-size:.7rem;color:var(--muted);text-align:center;margin-top:.5rem"></div>
+          </div>
+
+          <!-- DIVIDER -->
+          <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:1.25rem">
+            <div style="flex:1;height:1px;background:var(--border)"></div>
+            <span style="font-family:'DM Mono',monospace;font-size:.65rem;color:var(--muted);letter-spacing:.08em">OR SEARCH BY STYLE</span>
+            <div style="flex:1;height:1px;background:var(--border)"></div>
+          </div>
 
           <div class="adm-field-group">
             <label class="adm-label">Dance Style to Search</label>
@@ -1409,6 +1501,14 @@ input[type=date]::-webkit-calendar-picker-indicator{filter:invert(.5)}
 
 <script>
 // ══════════════════════════════════════
+// SUPABASE
+// ══════════════════════════════════════
+const _supa = supabase.createClient(
+  'https://jfpikbveabkmgrhpeyxu.supabase.co',
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpmcGlrYnZlYWJrbWdyaHBleXh1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyNTAzMjEsImV4cCI6MjA4OTgyNjMyMX0.PnmU3qNH8hHx2Nk0O7IZSSnhyx4mUchIu7CSuayMUIw'
+);
+
+// ══════════════════════════════════════
 // DATA
 // ══════════════════════════════════════
 
@@ -1535,18 +1635,76 @@ let currentLearnStyle = 'kizomba';
 let currentFindStyle = '';
 let savedEvents = JSON.parse(localStorage.getItem('fm_saved') || '[]');
 let events = loadEvents();
+fetchEventsFromSupabase(); // async: replaces DEFAULT_EVENTS once Supabase responds
 let contacts = JSON.parse(localStorage.getItem('fm_contacts') || '[]');
 let pending = JSON.parse(localStorage.getItem('fm_pending') || '[]');
 let verifyAnswer = 0;
 let verifyNum1 = 0, verifyNum2 = 0;
 
 function loadEvents() {
-  const stored = localStorage.getItem('fm_events');
-  if (stored) return JSON.parse(stored);
-  localStorage.setItem('fm_events', JSON.stringify(DEFAULT_EVENTS));
-  return DEFAULT_EVENTS;
+  // Returns DEFAULT_EVENTS synchronously so the page can boot immediately.
+  // fetchEventsFromSupabase() runs right after and replaces the array + re-renders.
+  return [...DEFAULT_EVENTS];
 }
-function saveEvents() { localStorage.setItem('fm_events', JSON.stringify(events)); }
+
+async function fetchEventsFromSupabase() {
+  try {
+    const { data, error } = await _supa
+      .from('events')
+      .select('*')
+      .eq('status', 'approved')
+      .order('date', { ascending: true });
+    if (error) throw error;
+    if (data && data.length) {
+      // Map Supabase column names → internal field names
+      events = data.map(row => ({
+        id:        row.id,
+        name:      row.name,
+        style:     row.style,
+        date:      row.date,
+        time:      row.time,
+        city:      row.city,
+        venue:     row.venue,
+        address:   row.address,
+        promoter:  row.promoter,
+        desc:      row.description,   // description → desc
+        ticket:    row.ticket,
+        fb:        row.fb,
+        status:    row.status,
+        image:     row.image || '',
+      }));
+      renderEvents();
+      renderAdmEvents();
+    }
+  } catch (err) {
+    console.warn('FloorMap: Supabase fetchEvents failed, using defaults.', err);
+  }
+}
+
+async function saveEvents() {
+  // Upsert the full events array to Supabase
+  try {
+    const rows = events.map(ev => ({
+      id:          ev.id,
+      name:        ev.name,
+      style:       ev.style,
+      date:        ev.date,
+      time:        ev.time,
+      city:        ev.city,
+      venue:       ev.venue,
+      address:     ev.address,
+      promoter:    ev.promoter,
+      description: ev.desc,           // desc → description
+      ticket:      ev.ticket,
+      fb:          ev.fb,
+      status:      ev.status || 'approved',
+    }));
+    const { error } = await _supa.from('events').upsert(rows, { onConflict: 'id' });
+    if (error) throw error;
+  } catch (err) {
+    console.error('FloorMap: Supabase saveEvents failed.', err);
+  }
+}
 
 // ══ REVIEWS ══
 // ══ REVIEWS ══
@@ -2160,8 +2318,264 @@ function addAiEventToPending(i) {
   admToast(`✓ "${newEv.name}" added to Pending`);
 }
 
+// ══ FACEBOOK EVENT IMPORT ══
+async function importFacebookEvent() {
+  const url = document.getElementById('fbImportUrl').value.trim();
+  const statusEl = document.getElementById('fbImportStatus');
+  const btn = document.getElementById('fbImportBtn');
 
-// ══ HEADER ══
+  if (!url) { statusEl.textContent = '⚠ Please paste a Facebook event URL'; return; }
+  if (!url.includes('facebook.com')) { statusEl.textContent = '⚠ URL must be a Facebook link'; return; }
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Extracting event details...';
+  statusEl.textContent = 'Claude is reading the Facebook event...';
+
+  const prompt = `Visit this Facebook event page and extract all event information: ${url}
+
+If you cannot access the page directly, search the web for information about this specific Facebook event URL.
+
+Return ONLY a single JSON object (no array, no markdown, no extra text):
+{
+  "name": "Full event name",
+  "style": "Dance style - one of: Salsa, Bachata, Kizomba, Urban Kiz, Zouk, Tango, Latin, Semba, Afro House",
+  "date": "YYYY-MM-DD or empty string",
+  "time": "HH:MM or empty string",
+  "city": "City in Netherlands",
+  "venue": "Venue name",
+  "address": "Full address",
+  "desc": "Event description max 200 chars",
+  "promoter": "Organiser or page name",
+  "ticket": "Ticket URL if found, else empty string",
+  "fb": "${url}"
+}
+
+If you cannot find specific details, leave that field as an empty string. Do not invent details.`;
+
+  try {
+    const response = await fetch('/.netlify/functions/ai-search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+
+    const data = await response.json();
+    const textContent = (data.content || [])
+      .filter(b => b.type === 'text')
+      .map(b => b.text)
+      .join('');
+
+    let ev = null;
+    try {
+      // Match single object or first object in array
+      const objMatch = textContent.match(/\{[\s\S]*?\}/);
+      if (objMatch) ev = JSON.parse(objMatch[0]);
+    } catch(e) {
+      statusEl.textContent = '⚠ Could not read event details. Try the web search instead.';
+      btn.disabled = false; btn.textContent = '📘 Import This Event';
+      return;
+    }
+
+    if (!ev || !ev.name) {
+      statusEl.textContent = '⚠ Could not find event details at this URL.';
+      btn.disabled = false; btn.textContent = '📘 Import This Event';
+      return;
+    }
+
+    // Add to pending
+    const newEv = {
+      id: 'fb' + Date.now(),
+      name: ev.name || 'Facebook Event',
+      style: ev.style || 'Kizomba',
+      date: ev.date || '',
+      time: ev.time || '',
+      city: ev.city || '',
+      venue: ev.venue || '',
+      address: ev.address || ev.city || '',
+      desc: ev.desc || '',
+      promoter: ev.promoter || '',
+      image: '',
+      ticket: ev.ticket || '',
+      fb: url,
+      status: 'pending'
+    };
+    pending.push(newEv);
+    localStorage.setItem('fm_pending', JSON.stringify(pending));
+    const badge = document.getElementById('pendingBadge');
+    if (badge) badge.textContent = pending.length || '';
+
+    statusEl.innerHTML = `✅ <strong style="color:#00c9a7">"${newEv.name}"</strong> added to Pending! Check the Pending tab to approve it.`;
+    document.getElementById('fbImportUrl').value = '';
+    admToast(`✓ "${newEv.name}" added to Pending`);
+
+  } catch(err) {
+    statusEl.textContent = '⚠ Import failed — check connection or try another URL.';
+    console.error('FB import error:', err);
+  }
+
+  btn.disabled = false;
+  btn.textContent = '📘 Import This Event';
+}
+
+
+// ══ LINK IMPORT (standalone, uses API key from Settings) ══
+async function runLinkImport() {
+  const url = document.getElementById('linkImportUrl').value.trim();
+  const statusEl = document.getElementById('linkImportStatus');
+  const btn = document.getElementById('linkImportBtn');
+  const formEl = document.getElementById('linkImportForm');
+  const warningEl = document.getElementById('linkImportKeyWarning');
+
+  // Check API key
+  const apiKey = localStorage.getItem('fm_apikey') || '';
+  if (!apiKey) {
+    warningEl.style.display = 'block';
+    return;
+  }
+  warningEl.style.display = 'none';
+
+  if (!url) { statusEl.textContent = '⚠ Please paste an event URL first'; return; }
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Reading event...';
+  statusEl.textContent = 'Claude is reading the event page...';
+  formEl.style.display = 'none';
+
+  const prompt = `Read this event page and extract all available event details: ${url}
+
+If you cannot access the page directly, search the web for this URL to find cached or referenced information about it.
+
+Return ONLY a single JSON object (no array, no markdown, no explanation before or after):
+{
+  "name": "Full event name",
+  "style": "One of: Salsa, Bachata, Kizomba, Urban Kiz, Zouk, Tango, Latin, Semba, Afro House",
+  "date": "YYYY-MM-DD",
+  "time": "HH:MM",
+  "city": "City name",
+  "venue": "Venue or location name",
+  "address": "Full street address",
+  "desc": "Short description max 200 characters",
+  "promoter": "Organiser or event page name",
+  "ticket": "Ticket URL or empty string",
+  "fb": "Facebook event URL or empty string"
+}
+Leave fields as empty string if not found. Do not invent information.`;
+
+  try {
+    const response = await fetch('/.netlify/functions/ai-search', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+
+    if (response.status === 401) {
+      statusEl.textContent = '⚠ Invalid API key. Check Settings → Anthropic API Key.';
+      btn.disabled = false; btn.textContent = '🔍 Read Event from Link';
+      return;
+    }
+
+    const data = await response.json();
+    const textContent = (data.content || [])
+      .filter(b => b.type === 'text')
+      .map(b => b.text)
+      .join('');
+
+    let ev = null;
+    try {
+      const objMatch = textContent.match(/\{[\s\S]*\}/);
+      if (objMatch) ev = JSON.parse(objMatch[0]);
+    } catch(e) {
+      statusEl.textContent = '⚠ Could not read event details. Try a different URL.';
+      btn.disabled = false; btn.textContent = '🔍 Read Event from Link';
+      return;
+    }
+
+    if (!ev || !ev.name) {
+      statusEl.textContent = '⚠ No event details found at this URL. Try another link.';
+      btn.disabled = false; btn.textContent = '🔍 Read Event from Link';
+      return;
+    }
+
+    // Fill in the editable form
+    document.getElementById('li_name').value = ev.name || '';
+    // Set style dropdown
+    const styleEl = document.getElementById('li_style');
+    for (let opt of styleEl.options) {
+      if (opt.value.toLowerCase() === (ev.style || '').toLowerCase()) { styleEl.value = opt.value; break; }
+    }
+    document.getElementById('li_date').value = ev.date || '';
+    document.getElementById('li_time').value = ev.time || '';
+    document.getElementById('li_city').value = ev.city || '';
+    document.getElementById('li_venue').value = ev.venue || '';
+    document.getElementById('li_address').value = ev.address || '';
+    document.getElementById('li_promoter').value = ev.promoter || '';
+    document.getElementById('li_desc').value = ev.desc || '';
+    document.getElementById('li_ticket').value = ev.ticket || '';
+    document.getElementById('li_fb').value = ev.fb || url;
+
+    formEl.style.display = 'block';
+    statusEl.textContent = '✓ Event details found. Review and edit below, then save to Pending.';
+    statusEl.style.color = '#00c9a7';
+
+  } catch(err) {
+    statusEl.textContent = '⚠ Request failed — check your API key and internet connection.';
+    console.error('Link import error:', err);
+  }
+
+  btn.disabled = false;
+  btn.textContent = '🔍 Read Event from Link';
+}
+
+function saveLinkImportToPending() {
+  const name = document.getElementById('li_name').value.trim();
+  if (!name) { admToast('⚠ Event name is required'); return; }
+
+  const newEv = {
+    id: 'li' + Date.now(),
+    name,
+    style: document.getElementById('li_style').value || 'Kizomba',
+    date: document.getElementById('li_date').value || '',
+    time: document.getElementById('li_time').value || '',
+    city: document.getElementById('li_city').value || '',
+    venue: document.getElementById('li_venue').value || '',
+    address: document.getElementById('li_address').value || '',
+    desc: document.getElementById('li_desc').value || '',
+    promoter: document.getElementById('li_promoter').value || '',
+    image: '',
+    ticket: document.getElementById('li_ticket').value || '',
+    fb: document.getElementById('li_fb').value || '',
+    status: 'pending'
+  };
+
+  pending.push(newEv);
+  localStorage.setItem('fm_pending', JSON.stringify(pending));
+  const badge = document.getElementById('pendingBadge');
+  if (badge) badge.textContent = pending.length || '';
+  admToast(`✓ "${newEv.name}" saved to Pending`);
+  resetLinkImport();
+}
+
+function resetLinkImport() {
+  document.getElementById('linkImportUrl').value = '';
+  document.getElementById('linkImportStatus').textContent = '';
+  document.getElementById('linkImportStatus').style.color = '';
+  document.getElementById('linkImportForm').style.display = 'none';
+  ['li_name','li_date','li_time','li_city','li_venue','li_address','li_promoter','li_desc','li_ticket','li_fb'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+}
 function toggleFmMenu() {
   const m = document.getElementById('fmMenu');
   m.classList.toggle('open');
@@ -2222,8 +2636,27 @@ function applyEventFilter() {
   const q = document.getElementById('eventSearchInput').value.toLowerCase();
   const city = document.getElementById('cityInput').value.toLowerCase();
   renderEvents(q, currentFindStyle, city);
-  // scroll to events
-  document.getElementById('eventsContainer').scrollIntoView({behavior:'smooth'});
+  // Close the block so results are visible
+  toggleActionBlock('findEvent');
+  // Scroll to events after block closes
+  setTimeout(() => {
+    document.getElementById('eventsContainer').scrollIntoView({behavior:'smooth'});
+  }, 250);
+}
+function cancelFindEvent() {
+  // Reset search fields
+  document.getElementById('eventSearchInput').value = '';
+  document.getElementById('cityInput').value = '';
+  currentFindStyle = '';
+  document.querySelectorAll('#findStyleList .style-list-item').forEach((el, i) => {
+    el.classList.toggle('active', i === 0);
+  });
+  setLocation('nearme');
+  renderEvents();
+  // Close the block
+  toggleActionBlock('findEvent');
+  // Scroll to top
+  scrollToTop();
 }
 function filterEvents() {
   const q = document.getElementById('eventSearchInput').value.toLowerCase();
@@ -2300,7 +2733,7 @@ function buildEventCard(ev) {
   const placeholder = `<div class="event-flyer-placeholder" style="${imgSrc?'display:none':''}">🎵</div>`;
 
   return `
-  <div class="event-card" onclick="openEventDetail('${ev.id}')">
+  <div class="event-card" id="card-${ev.id}" onclick="openEventDetail('${ev.id}')">
     <div class="event-flyer">
       ${imgHtml}${placeholder}
       ${!ev.image ? `<div class="event-flyer-name">${ev.name}</div>` : ''}
@@ -2782,8 +3215,26 @@ function openAdmin() {
   document.getElementById('adminOverlay').classList.add('open');
 }
 function closeAdmin(e) {
-  if (!e || e.target === document.getElementById('adminOverlay'))
-    document.getElementById('adminOverlay').classList.remove('open');
+  if (e && e.target !== document.getElementById('adminOverlay') && !e.target.classList.contains('admin-close')) return;
+  document.getElementById('adminOverlay').classList.remove('open');
+
+  // If an event was just approved, scroll to it
+  if (window._lastApprovedEventId) {
+    setTimeout(() => {
+      const card = document.getElementById('card-' + window._lastApprovedEventId);
+      if (card) {
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Flash highlight so user sees which event was added
+        card.style.transition = 'box-shadow .3s';
+        card.style.boxShadow = '0 0 0 3px var(--accent), 0 8px 32px rgba(255,107,53,.4)';
+        setTimeout(() => { card.style.boxShadow = ''; }, 2500);
+      } else {
+        // Card not visible (filtered out) — scroll to events section
+        document.getElementById('eventsContainer').scrollIntoView({ behavior: 'smooth' });
+      }
+      window._lastApprovedEventId = null;
+    }, 300);
+  }
 }
 function unlockAdmin() {
   if (document.getElementById('adminPwInput').value === adminPassword) {
@@ -2809,6 +3260,12 @@ function switchAdminTab(tab) {
   if (tab === 'analytics') renderAdmAnalytics();
   if (tab === 'password') {}
   if (tab === 'aiSearch') {}
+  if (tab === 'linkImport') {
+    // Check API key and show warning if missing
+    const hasKey = !!localStorage.getItem('fm_apikey');
+    const w = document.getElementById('linkImportKeyWarning');
+    if (w) w.style.display = hasKey ? 'none' : 'block';
+  }
 }
 
 // ══ USERS ══
@@ -2998,17 +3455,20 @@ function renderAdmPending() {
 }
 function approveEvent(i) {
   const ev = {...pending[i]};
-  delete ev.status;
+  ev.status = 'approved';
   ev.id = 'a' + Date.now();
   events.push(ev);
-  pending.splice(i,1);
+  pending.splice(i, 1);
   saveEvents();
   localStorage.setItem('fm_pending', JSON.stringify(pending));
   renderEvents();
   renderAdmPending();
   const b = document.getElementById('pendingBadge');
   if (b) b.textContent = pending.length || '';
-  admToast('✓ Event approved & published');
+  admToast('✓ Event approved & live!');
+
+  // Store the new event id so we can scroll to it when admin closes
+  window._lastApprovedEventId = ev.id;
 }
 function rejectEvent(i) {
   if (!confirm('Reject and delete this submission?')) return;
@@ -3049,9 +3509,8 @@ function adminAddEvent() {
     promoter: document.getElementById('ae-promoter').value,
     image: document.getElementById('ae-image').value,
     ticket: document.getElementById('ae-ticket').value,
+    status: 'approved',
   };
-  events.push(ev);
-  saveEvents();
   renderEvents();
   admToast('Event added ✓');
   ['ae-name','ae-date','ae-time','ae-city','ae-venue','ae-promoter','ae-desc','ae-image','ae-ticket'].forEach(id => {
@@ -3091,6 +3550,9 @@ function saveSettings() {
     feeEnabled: document.getElementById('cfg_feeEnabled').checked,
   };
   localStorage.setItem('fm_settings', JSON.stringify(cfg));
+  // Save API key separately (never in the general settings object)
+  const apiKey = document.getElementById('cfg_apiKey').value.trim();
+  if (apiKey) localStorage.setItem('fm_apikey', apiKey);
   admToast('Settings saved ✓');
 }
 function loadSettings() {
@@ -3107,6 +3569,10 @@ function loadSettings() {
     if (cfg.fee) document.getElementById('cfg_fee').value = cfg.fee;
     if (cfg.feeEnabled) document.getElementById('cfg_feeEnabled').checked = cfg.feeEnabled;
   } catch(e) {}
+  // Load API key
+  const storedKey = localStorage.getItem('fm_apikey') || '';
+  const keyEl = document.getElementById('cfg_apiKey');
+  if (keyEl && storedKey) keyEl.value = storedKey;
   try {
     const txt = JSON.parse(localStorage.getItem('fm_texts') || '{}');
     if (txt.findEvent) document.getElementById('txt_findEvent').value = txt.findEvent;
@@ -3115,6 +3581,12 @@ function loadSettings() {
     if (txt.promote) document.getElementById('txt_promote').value = txt.promote;
     if (txt.promoteSub) document.getElementById('txt_promoteSub').value = txt.promoteSub;
   } catch(e) {}
+}
+function toggleApiKeyVisibility() {
+  const el = document.getElementById('cfg_apiKey');
+  const btn = document.getElementById('apiKeyToggle');
+  if (el.type === 'password') { el.type = 'text'; btn.textContent = '🙈'; }
+  else { el.type = 'password'; btn.textContent = '👁'; }
 }
 function clearAllData() {
   if (!confirm('Reset ALL data? This clears events, contacts, pending submissions. Cannot be undone.')) return;
