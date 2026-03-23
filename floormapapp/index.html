@@ -126,6 +126,8 @@ body::after{content:'';position:fixed;inset:0;background-image:url("data:image/s
 .style-list-item:hover,.style-list-item.active{background:rgba(255,107,53,.15);color:var(--accent)}
 .btn-find{width:100%;background:var(--surface);border:1px solid rgba(255,255,255,.15);border-radius:10px;padding:.82rem;color:#fff;font-family:'Syne',sans-serif;font-size:.95rem;font-weight:700;cursor:pointer;transition:all .2s;margin-top:.5rem}
 .btn-find:hover{background:var(--accent);border-color:var(--accent)}
+.btn-cancel-find{width:100%;background:none;border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:.65rem;color:var(--muted);font-family:'Syne',sans-serif;font-size:.85rem;font-weight:700;cursor:pointer;transition:all .2s;margin-top:.5rem}
+.btn-cancel-find:hover{border-color:rgba(255,255,255,.25);color:var(--text)}
 
 /* LEARN DANCE */
 .level-pills{display:flex;gap:.5rem;margin-bottom:1.25rem;flex-wrap:wrap}
@@ -624,6 +626,7 @@ input[type=date]::-webkit-calendar-picker-indicator{filter:invert(.5)}
           <div class="style-list-item" onclick="selectFindStyle(this,'Latin')">Latin</div>
         </div>
         <button class="btn-find" onclick="applyEventFilter()">Find Events</button>
+        <button class="btn-cancel-find" onclick="cancelFindEvent()">✕ Cancel</button>
       </div>
     </div>
 
@@ -1025,6 +1028,25 @@ input[type=date]::-webkit-calendar-picker-indicator{filter:invert(.5)}
           <div style="font-family:'DM Mono',monospace;font-size:.65rem;color:#00c9a7;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.5rem">🤖 AI Event Search</div>
           <div style="font-size:.78rem;color:var(--muted);margin-bottom:1rem;line-height:1.5">Uses Claude AI to search the web for upcoming Dutch dance events. Found events go to Pending for your review.</div>
 
+          <!-- FACEBOOK URL IMPORT -->
+          <div style="background:rgba(0,201,167,.06);border:1px solid rgba(0,201,167,.25);border-radius:12px;padding:1rem;margin-bottom:1.25rem">
+            <div class="adm-section-title" style="color:#00c9a7;border-color:rgba(0,201,167,.2)">📘 Import from Facebook Event URL</div>
+            <div style="font-size:.78rem;color:var(--muted);margin-bottom:.75rem;line-height:1.5">Paste a Facebook event link and Claude will extract all event details and add it to Pending.</div>
+            <div class="adm-field-group">
+              <label class="adm-label" style="color:#00c9a7">Facebook Event URL</label>
+              <input class="adm-input" id="fbImportUrl" type="url" placeholder="https://www.facebook.com/events/...">
+            </div>
+            <button class="adm-save-btn" id="fbImportBtn" onclick="importFacebookEvent()" style="width:100%;padding:.65rem;background:linear-gradient(135deg,#1877f2,#00c9a7);font-size:.88rem">📘 Import This Event</button>
+            <div id="fbImportStatus" style="font-family:'DM Mono',monospace;font-size:.7rem;color:var(--muted);text-align:center;margin-top:.5rem"></div>
+          </div>
+
+          <!-- DIVIDER -->
+          <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:1.25rem">
+            <div style="flex:1;height:1px;background:var(--border)"></div>
+            <span style="font-family:'DM Mono',monospace;font-size:.65rem;color:var(--muted);letter-spacing:.08em">OR SEARCH BY STYLE</span>
+            <div style="flex:1;height:1px;background:var(--border)"></div>
+          </div>
+
           <div class="adm-field-group">
             <label class="adm-label">Dance Style to Search</label>
             <select class="adm-input" id="aiSearchStyle">
@@ -1035,11 +1057,13 @@ input[type=date]::-webkit-calendar-picker-indicator{filter:invert(.5)}
               <option value="Hip Hop">Hip Hop</option>
               <option value="Kizomba">Kizomba</option>
               <option value="Traditional Kizomba">Traditional Kizomba</option>
+              <option value="Kizomba (Traditional)">Kizomba (Traditional)</option>
               <option value="Salsa">Salsa</option>
               <option value="Semba">Semba</option>
               <option value="Tango">Tango</option>
               <option value="Tarraxa">Tarraxa</option>
               <option value="Urban Kiz">Urban Kiz</option>
+              <option value="Urban Kizz">Urban Kizz</option>
               <option value="Zouk">Zouk</option>
             </select>
           </div>
@@ -2003,33 +2027,70 @@ async function runAiEventSearch() {
   results.innerHTML = '';
 
   const styleText = style === 'all'
-    ? 'Kizomba, Traditional Kizomba, Salsa, Bachata, Urban Kiz, Zouk, Tango, Semba, Afro House, Hip Hop, Tarraxa, Douceur'
+    ? 'Kizomba, Traditional Kizomba, Kizomba Tradi, Semba, Urban Kiz, Urban Kizz, Salsa, Bachata, Zouk, Tango, Afro House, Hip Hop, Tarraxa, Douceur'
     : style;
 
-  const prompt = `Search the web for upcoming dance events in ${region}, Netherlands in the next 3 months (from today ${new Date().toLocaleDateString('nl-NL')}). 
-Focus on these dance styles: ${styleText}.
-Look at websites like latinworld.nl, facebook.com events, eventbrite.nl, and any dance event sites.
+  // Build style-specific search variations for better results
+  const styleVariants = {
+    'Kizomba': 'kizomba OR "kiz party" OR "kizz party"',
+    'Traditional Kizomba': '"traditional kizomba" OR "kizomba tradi" OR "kizomba tradicional" OR semba',
+    'Kizomba (Traditional)': '"traditional kizomba" OR "kizomba tradi" OR "kizomba tradicional" OR semba',
+    'Urban Kiz': '"urban kiz" OR "urban kizz" OR "urbankiz"',
+    'Urban Kizz': '"urban kiz" OR "urban kizz" OR "urbankiz"',
+    'Semba': 'semba OR kizomba OR "afro dance"',
+    'Salsa': 'salsa OR "salsa party" OR "salsa night" OR "salsa social"',
+    'Bachata': 'bachata OR "bachata night" OR "bachata sensual"',
+    'Zouk': 'zouk OR "brasil zouk" OR "zouk social"',
+    'Tango': 'tango OR milonga OR "tango argentino"',
+    'Afro House': '"afro house" OR amapiano OR afrobeats',
+    'all': 'kizomba OR "urban kiz" OR "urban kizz" OR salsa OR bachata OR zouk OR semba OR tango OR "afro house"',
+  };
+  const searchTerms = styleVariants[style] || `"${styleText}"`;
 
-Return ONLY a JSON array (no other text, no markdown) with this exact structure for each event found:
+  const today = new Date();
+  const in3months = new Date(today);
+  in3months.setMonth(in3months.getMonth() + 3);
+  const dateRange = `${today.toLocaleDateString('nl-NL')} tot ${in3months.toLocaleDateString('nl-NL')}`;
+
+  const prompt = `Zoek op het web naar aankomende dans evenementen in ${region}, Nederland tussen nu (${today.toLocaleDateString('nl-NL')}) en ${in3months.toLocaleDateString('nl-NL')}.
+
+Zoek op deze websites (in deze volgorde):
+1. https://www.latinworld.nl/ - bekijk alle evenementen pagina's
+2. Facebook evenementen - zoek op "${searchTerms} ${region === 'Netherlands' ? 'nederland' : region}"
+3. Eventbrite.nl - zoek op dansevenementen
+4. Dans school websites in ${region === 'Netherlands' ? 'Nederland' : region}
+5. Google: ${searchTerms} evenement ${region === 'Netherlands' ? 'nederland' : region} 2025 OR 2026
+
+Dans stijlen om op te zoeken: ${styleText}
+Zoek ook op variaties: ${searchTerms}
+
+BELANGRIJK - Wees niet streng. Neem elk evenement mee dat:
+- Een naam heeft die lijkt op een dans evenement
+- In Nederland plaatsvindt
+- In de komende 3 maanden is (of de datum is niet zeker maar het ziet er aankomend uit)
+- Zelfs als de prijs, tijd, of exacte locatie ontbreekt
+
+Geef alleen een JSON array terug (geen andere tekst, geen markdown, geen uitleg), met deze structuur:
 [
   {
-    "name": "Event name",
-    "style": "One of: Salsa, Bachata, Kizomba, Urban Kiz, Zouk, Tango, Latin, Semba",
-    "date": "YYYY-MM-DD",
-    "time": "HH:MM",
-    "city": "City name",
-    "venue": "Venue name",
-    "address": "Full address",
-    "desc": "Short description max 150 chars",
-    "promoter": "Organiser name",
-    "ticket": "ticket URL or empty string",
-    "fb": "facebook event URL or empty string"
+    "name": "Naam van het evenement",
+    "style": "Een van: Salsa, Bachata, Kizomba, Urban Kiz, Zouk, Tango, Latin, Semba, Afro House",
+    "date": "YYYY-MM-DD of leeg als onbekend",
+    "time": "HH:MM of leeg als onbekend",
+    "city": "Stad",
+    "venue": "Locatie naam of leeg",
+    "address": "Adres of leeg",
+    "desc": "Korte beschrijving max 150 tekens",
+    "promoter": "Organisator naam of leeg",
+    "ticket": "ticket URL of leeg",
+    "fb": "facebook URL of leeg"
   }
 ]
-Find as many real events as you can (aim for 5-15). Only include events with a real date. No placeholder data.`;
+
+Zoek zo breed mogelijk. Geef 5 tot 20 evenementen terug. Neem evenementen mee ook als sommige velden leeg zijn.`;
 
   try {
-    const response = await fetch('/.netlify/functions/ai-search', {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2121,6 +2182,110 @@ function addAiEventToPending(i) {
   admToast(`✓ "${newEv.name}" added to Pending`);
 }
 
+// ══ FACEBOOK EVENT IMPORT ══
+async function importFacebookEvent() {
+  const url = document.getElementById('fbImportUrl').value.trim();
+  const statusEl = document.getElementById('fbImportStatus');
+  const btn = document.getElementById('fbImportBtn');
+
+  if (!url) { statusEl.textContent = '⚠ Please paste a Facebook event URL'; return; }
+  if (!url.includes('facebook.com')) { statusEl.textContent = '⚠ URL must be a Facebook link'; return; }
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Extracting event details...';
+  statusEl.textContent = 'Claude is reading the Facebook event...';
+
+  const prompt = `Visit this Facebook event page and extract all event information: ${url}
+
+If you cannot access the page directly, search the web for information about this specific Facebook event URL.
+
+Return ONLY a single JSON object (no array, no markdown, no extra text):
+{
+  "name": "Full event name",
+  "style": "Dance style - one of: Salsa, Bachata, Kizomba, Urban Kiz, Zouk, Tango, Latin, Semba, Afro House",
+  "date": "YYYY-MM-DD or empty string",
+  "time": "HH:MM or empty string",
+  "city": "City in Netherlands",
+  "venue": "Venue name",
+  "address": "Full address",
+  "desc": "Event description max 200 chars",
+  "promoter": "Organiser or page name",
+  "ticket": "Ticket URL if found, else empty string",
+  "fb": "${url}"
+}
+
+If you cannot find specific details, leave that field as an empty string. Do not invent details.`;
+
+  try {
+    const response = await fetch('/.netlify/functions/ai-search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+
+    const data = await response.json();
+    const textContent = (data.content || [])
+      .filter(b => b.type === 'text')
+      .map(b => b.text)
+      .join('');
+
+    let ev = null;
+    try {
+      // Match single object or first object in array
+      const objMatch = textContent.match(/\{[\s\S]*?\}/);
+      if (objMatch) ev = JSON.parse(objMatch[0]);
+    } catch(e) {
+      statusEl.textContent = '⚠ Could not read event details. Try the web search instead.';
+      btn.disabled = false; btn.textContent = '📘 Import This Event';
+      return;
+    }
+
+    if (!ev || !ev.name) {
+      statusEl.textContent = '⚠ Could not find event details at this URL.';
+      btn.disabled = false; btn.textContent = '📘 Import This Event';
+      return;
+    }
+
+    // Add to pending
+    const newEv = {
+      id: 'fb' + Date.now(),
+      name: ev.name || 'Facebook Event',
+      style: ev.style || 'Kizomba',
+      date: ev.date || '',
+      time: ev.time || '',
+      city: ev.city || '',
+      venue: ev.venue || '',
+      address: ev.address || ev.city || '',
+      desc: ev.desc || '',
+      promoter: ev.promoter || '',
+      image: '',
+      ticket: ev.ticket || '',
+      fb: url,
+      status: 'pending'
+    };
+    pending.push(newEv);
+    localStorage.setItem('fm_pending', JSON.stringify(pending));
+    const badge = document.getElementById('pendingBadge');
+    if (badge) badge.textContent = pending.length || '';
+
+    statusEl.innerHTML = `✅ <strong style="color:#00c9a7">"${newEv.name}"</strong> added to Pending! Check the Pending tab to approve it.`;
+    document.getElementById('fbImportUrl').value = '';
+    admToast(`✓ "${newEv.name}" added to Pending`);
+
+  } catch(err) {
+    statusEl.textContent = '⚠ Import failed — check connection or try another URL.';
+    console.error('FB import error:', err);
+  }
+
+  btn.disabled = false;
+  btn.textContent = '📘 Import This Event';
+}
+
 
 // ══ HEADER ══
 function toggleFmMenu() {
@@ -2183,8 +2348,27 @@ function applyEventFilter() {
   const q = document.getElementById('eventSearchInput').value.toLowerCase();
   const city = document.getElementById('cityInput').value.toLowerCase();
   renderEvents(q, currentFindStyle, city);
-  // scroll to events
-  document.getElementById('eventsContainer').scrollIntoView({behavior:'smooth'});
+  // Close the block so results are visible
+  toggleActionBlock('findEvent');
+  // Scroll to events after block closes
+  setTimeout(() => {
+    document.getElementById('eventsContainer').scrollIntoView({behavior:'smooth'});
+  }, 250);
+}
+function cancelFindEvent() {
+  // Reset search fields
+  document.getElementById('eventSearchInput').value = '';
+  document.getElementById('cityInput').value = '';
+  currentFindStyle = '';
+  document.querySelectorAll('#findStyleList .style-list-item').forEach((el, i) => {
+    el.classList.toggle('active', i === 0);
+  });
+  setLocation('nearme');
+  renderEvents();
+  // Close the block
+  toggleActionBlock('findEvent');
+  // Scroll to top
+  scrollToTop();
 }
 function filterEvents() {
   const q = document.getElementById('eventSearchInput').value.toLowerCase();
