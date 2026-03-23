@@ -1684,23 +1684,35 @@ async function fetchEventsFromSupabase() {
 async function saveEvents() {
   // Upsert the full events array to Supabase
   try {
-    const rows = events.map(ev => ({
-      id:          ev.id,
-      name:        ev.name,
-      style:       ev.style,
-      date:        ev.date,
-      time:        ev.time,
-      city:        ev.city,
-      venue:       ev.venue,
-      address:     ev.address,
-      promoter:    ev.promoter,
-      description: ev.desc,           // desc → description
-      ticket:      ev.ticket,
-      fb:          ev.fb,
-      status:      ev.status || 'approved',
-    }));
-    const { error } = await _supa.from('events').upsert(rows, { onConflict: 'id' });
-    if (error) throw error;
+    const rows = events.map(ev => {
+      const row = {
+        name:        ev.name,
+        style:       ev.style,
+        date:        ev.date,
+        time:        ev.time,
+        city:        ev.city,
+        venue:       ev.venue,
+        address:     ev.address,
+        promoter:    ev.promoter,
+        description: ev.desc,           // desc → description
+        ticket:      ev.ticket,
+        fb:          ev.fb,
+        status:      ev.status || 'approved',
+      };
+      if (ev.id) row.id = ev.id; // Only include id if it exists (real UUID)
+      return row;
+    });
+    // Split into updates (have id) and inserts (no id)
+    const toUpdate = rows.filter(r => r.id);
+    const toInsert = rows.filter(r => !r.id);
+    if (toUpdate.length) {
+      const { error } = await _supa.from('events').upsert(toUpdate, { onConflict: 'id' });
+      if (error) throw error;
+    }
+    if (toInsert.length) {
+      const { error } = await _supa.from('events').insert(toInsert);
+      if (error) throw error;
+    }
   } catch (err) {
     console.error('FloorMap: Supabase saveEvents failed.', err);
   }
@@ -1920,21 +1932,10 @@ function loginToast(msg) {
   t._timer = setTimeout(() => { t.style.opacity = '0'; }, 2500);
 }
 
-// ══ LOGIN LOGO TRIPLE TAP (login screen → admin bypass) ══
+// ══ LOGIN LOGO TAP ══
 let loginTapCount = 0, loginTapTimer = null;
 function handleLoginLogoTap() {
-  loginTapCount++;
-  clearTimeout(loginTapTimer);
-  if (loginTapCount === 3) {
-    loginTapCount = 0;
-    // Admin bypass — skip login entirely
-    localStorage.setItem('fm_currentUser', JSON.stringify({email:'admin@floormap.nl', name:'Admin'}));
-    doLogin();
-    // Open admin panel after app loads
-    setTimeout(() => openAdmin(), 300);
-    return;
-  }
-  loginTapTimer = setTimeout(() => { loginTapCount = 0; }, 500);
+  // Triple-tap admin bypass removed for security
 }
 
 function doSignIn() {
@@ -3456,7 +3457,7 @@ function renderAdmPending() {
 function approveEvent(i) {
   const ev = {...pending[i]};
   ev.status = 'approved';
-  ev.id = 'a' + Date.now();
+  delete ev.id; // Let Supabase generate a real UUID — fake ids cause silent insert failures
   events.push(ev);
   pending.splice(i, 1);
   saveEvents();
@@ -3466,9 +3467,7 @@ function approveEvent(i) {
   const b = document.getElementById('pendingBadge');
   if (b) b.textContent = pending.length || '';
   admToast('✓ Event approved & live!');
-
-  // Store the new event id so we can scroll to it when admin closes
-  window._lastApprovedEventId = ev.id;
+  window._lastApprovedEventId = null;
 }
 function rejectEvent(i) {
   if (!confirm('Reject and delete this submission?')) return;
