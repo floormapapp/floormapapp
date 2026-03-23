@@ -1684,23 +1684,35 @@ async function fetchEventsFromSupabase() {
 async function saveEvents() {
   // Upsert the full events array to Supabase
   try {
-    const rows = events.map(ev => ({
-      id:          ev.id,
-      name:        ev.name,
-      style:       ev.style,
-      date:        ev.date,
-      time:        ev.time,
-      city:        ev.city,
-      venue:       ev.venue,
-      address:     ev.address,
-      promoter:    ev.promoter,
-      description: ev.desc,           // desc → description
-      ticket:      ev.ticket,
-      fb:          ev.fb,
-      status:      ev.status || 'approved',
-    }));
-    const { error } = await _supa.from('events').upsert(rows, { onConflict: 'id' });
-    if (error) throw error;
+    const rows = events.map(ev => {
+      const row = {
+        name:        ev.name,
+        style:       ev.style,
+        date:        ev.date,
+        time:        ev.time,
+        city:        ev.city,
+        venue:       ev.venue,
+        address:     ev.address,
+        promoter:    ev.promoter,
+        description: ev.desc,           // desc → description
+        ticket:      ev.ticket,
+        fb:          ev.fb,
+        status:      ev.status || 'approved',
+      };
+      if (ev.id) row.id = ev.id; // Only include id if it exists (real UUID)
+      return row;
+    });
+    // Split into updates (have id) and inserts (no id)
+    const toUpdate = rows.filter(r => r.id);
+    const toInsert = rows.filter(r => !r.id);
+    if (toUpdate.length) {
+      const { error } = await _supa.from('events').upsert(toUpdate, { onConflict: 'id' });
+      if (error) throw error;
+    }
+    if (toInsert.length) {
+      const { error } = await _supa.from('events').insert(toInsert);
+      if (error) throw error;
+    }
   } catch (err) {
     console.error('FloorMap: Supabase saveEvents failed.', err);
   }
@@ -1718,15 +1730,50 @@ const DEFAULT_REVIEWS = [
 ];
 
 function loadReviews() {
+  // Returns local reviews only — Supabase reviews loaded async by fetchReviewsFromSupabase()
   const stored = localStorage.getItem('fm_reviews');
-  if (stored) {
-    const saved = JSON.parse(stored);
-    // Always include DEFAULT_REVIEWS (admin-curated) + device reviews
-    const savedIds = saved.map(r => r.id);
-    return [...DEFAULT_REVIEWS.filter(r => !savedIds.includes(r.id)), ...saved];
+  return stored ? JSON.parse(stored) : [];
+}
+
+async function fetchReviewsFromSupabase() {
+  try {
+    const { data, error } = await _supa
+      .from('reviews')
+      .select('*')
+      .order('submitted_at', { ascending: false });
+    if (error) throw error;
+    if (data) {
+      // Merge Supabase reviews with any local-only ones (dedup by id)
+      const remoteIds = data.map(r => r.id);
+      const localOnly = reviews.filter(r => !remoteIds.includes(r.id));
+      reviews = [
+        ...data.map(r => ({
+          id: r.id, eventId: r.event_id, eventName: r.event_name,
+          stars: r.stars, text: r.text, author: r.author,
+          submittedAt: r.submitted_at, status: r.status,
+        })),
+        ...localOnly,
+      ];
+      updateReviewBadge();
+      renderAdmReviews();
+    }
+  } catch (err) {
+    console.warn('FloorMap: fetchReviews failed, using local.', err.message || err);
   }
-  localStorage.setItem('fm_reviews', JSON.stringify(DEFAULT_REVIEWS));
-  return [...DEFAULT_REVIEWS];
+}
+
+async function saveReviewToSupabase(review) {
+  try {
+    const row = {
+      id: review.id, event_id: review.eventId, event_name: review.eventName,
+      stars: review.stars, text: review.text, author: review.author,
+      submitted_at: review.submittedAt, status: review.status,
+    };
+    const { error } = await _supa.from('reviews').upsert(row, { onConflict: 'id' });
+    if (error) throw error;
+  } catch (err) {
+    console.warn('FloorMap: saveReview failed, saved locally only.', err.message || err);
+  }
 }
 
 let reviews = loadReviews();
@@ -1812,6 +1859,7 @@ function submitReview() {
   };
   reviews.push(review);
   saveReviews();
+  saveReviewToSupabase(review); // async — saves to Supabase so admin sees it from any device
 
   // Update review badge in admin
   updateReviewBadge();
@@ -1871,16 +1919,18 @@ function renderAdmReviews() {
 
 function approveReview(id) {
   const r = reviews.find(r => r.id === id);
-  if (r) { r.status = 'approved'; saveReviews(); updateReviewBadge(); renderAdmReviews(); admToast('✓ Review approved'); }
+  if (r) { r.status = 'approved'; saveReviews(); saveReviewToSupabase(r); updateReviewBadge(); renderAdmReviews(); admToast('✓ Review approved'); }
 }
 function rejectReview(id) {
   const r = reviews.find(r => r.id === id);
-  if (r) { r.status = 'rejected'; saveReviews(); updateReviewBadge(); renderAdmReviews(); admToast('Review rejected'); }
+  if (r) { r.status = 'rejected'; saveReviews(); saveReviewToSupabase(r); updateReviewBadge(); renderAdmReviews(); admToast('Review rejected'); }
 }
 function deleteReview(id) {
   if (!confirm('Delete this review permanently?')) return;
   reviews = reviews.filter(r => r.id !== id);
-  saveReviews(); updateReviewBadge(); renderAdmReviews(); admToast('Review deleted');
+  saveReviews();
+  try { _supa.from('reviews').delete().eq('id', id); } catch(e) {}
+  updateReviewBadge(); renderAdmReviews(); admToast('Review deleted');
 }
 
 
@@ -1923,7 +1973,7 @@ function loginToast(msg) {
 // ══ LOGIN LOGO TAP ══
 let loginTapCount = 0, loginTapTimer = null;
 function handleLoginLogoTap() {
-  // No special action on login logo tap
+  // Triple-tap admin bypass removed for security
 }
 
 function doSignIn() {
@@ -1985,6 +2035,8 @@ function doLogin() {
   renderLearnSteps();
   buildStylePicker();
   updateReviewBadge();
+  fetchReviewsFromSupabase();  // async — loads all reviews from Supabase for all users
+  fetchPendingFromSupabase();  // async — loads all pending submissions for admin
 }
 
 // ══ LEGAL MODALS ══
@@ -2984,6 +3036,7 @@ function submitEvent() {
 
   pending.push(ev);
   localStorage.setItem('fm_pending', JSON.stringify(pending));
+  savePendingToSupabase(ev); // async — saves to Supabase so admin sees from any device
 
   // Update pending badge if admin is open
   const badge = document.getElementById('pendingBadge');
@@ -3230,6 +3283,8 @@ function unlockAdmin() {
     adminUnlocked = true;
     document.getElementById('adminPwScreen').style.display = 'none';
     document.getElementById('adminContent').style.display = 'block';
+    fetchPendingFromSupabase();  // refresh pending from Supabase every time admin opens
+    fetchReviewsFromSupabase();  // refresh reviews from Supabase every time admin opens
     loadAdminData();
   } else {
     admToast('Incorrect password');
@@ -3241,8 +3296,8 @@ function switchAdminTab(tab) {
   document.querySelectorAll('.admin-section').forEach(s => s.classList.remove('active'));
   document.getElementById('admTab-' + tab).classList.add('active');
   if (tab === 'events') renderAdmEvents();
-  if (tab === 'pending') renderAdmPending();
-  if (tab === 'reviews') renderAdmReviews();
+  if (tab === 'pending') { fetchPendingFromSupabase().then(() => renderAdmPending()); }
+  if (tab === 'reviews') { fetchReviewsFromSupabase().then(() => renderAdmReviews()); }
   if (tab === 'inbox') renderAdmInbox();
   if (tab === 'settings') loadSettings();
   if (tab === 'users') renderAdmUsers();
@@ -3424,6 +3479,50 @@ function deleteEvent(id) {
   renderAdmEvents();
   admToast('Event deleted ✓');
 }
+async function fetchPendingFromSupabase() {
+  try {
+    const { data, error } = await _supa
+      .from('pending')
+      .select('*')
+      .order('submitted_at', { ascending: false });
+    if (error) throw error;
+    if (data) {
+      const remoteIds = data.map(r => r.id);
+      const localOnly = pending.filter(p => !remoteIds.includes(p.id));
+      pending = [
+        ...data.map(r => ({
+          id: r.id, name: r.name, style: r.style, date: r.date, time: r.time,
+          city: r.city, venue: r.venue, address: r.address, desc: r.description,
+          promoter: r.promoter, image: r.image || '', ticket: r.ticket,
+          fb: r.fb, status: 'pending',
+        })),
+        ...localOnly,
+      ];
+      localStorage.setItem('fm_pending', JSON.stringify(pending));
+      const b = document.getElementById('pendingBadge');
+      if (b) b.textContent = pending.length || '';
+      renderAdmPending();
+    }
+  } catch (err) {
+    console.warn('FloorMap: fetchPending failed, using local.', err.message || err);
+  }
+}
+
+async function savePendingToSupabase(ev) {
+  try {
+    const row = {
+      id: ev.id, name: ev.name, style: ev.style, date: ev.date, time: ev.time,
+      city: ev.city, venue: ev.venue, address: ev.address, description: ev.desc,
+      promoter: ev.promoter, image: ev.image || '', ticket: ev.ticket,
+      fb: ev.fb, submitted_at: new Date().toISOString(),
+    };
+    const { error } = await _supa.from('pending').upsert(row, { onConflict: 'id' });
+    if (error) throw error;
+  } catch (err) {
+    console.warn('FloorMap: savePending failed, saved locally only.', err.message || err);
+  }
+}
+
 function renderAdmPending() {
   const list = document.getElementById('admPendingList');
   if (!pending.length) { list.innerHTML = '<div class="adm-empty">No pending submissions.</div>'; return; }
@@ -3444,11 +3543,14 @@ function renderAdmPending() {
 }
 function approveEvent(i) {
   const ev = {...pending[i]};
+  const pendingId = ev.id; // keep for Supabase delete
   ev.status = 'approved';
-  delete ev.id; // Let Supabase generate a real UUID on insert
+  delete ev.id; // Let Supabase generate a real UUID on INSERT
   events.push(ev);
   pending.splice(i, 1);
   saveEvents();
+  // Remove from pending table in Supabase
+  try { _supa.from('pending').delete().eq('id', pendingId); } catch(e) {}
   localStorage.setItem('fm_pending', JSON.stringify(pending));
   renderEvents();
   renderAdmPending();
@@ -3459,7 +3561,9 @@ function approveEvent(i) {
 }
 function rejectEvent(i) {
   if (!confirm('Reject and delete this submission?')) return;
+  const pendingId = pending[i].id;
   pending.splice(i,1);
+  try { _supa.from('pending').delete().eq('id', pendingId); } catch(e) {}
   localStorage.setItem('fm_pending', JSON.stringify(pending));
   renderAdmPending();
   const b = document.getElementById('pendingBadge');
@@ -3484,7 +3588,7 @@ function adminAddEvent() {
   const name = document.getElementById('ae-name').value.trim();
   if (!name) { admToast('Event name required'); return; }
   const ev = {
-    id: 'a' + Date.now(),
+    // No id — Supabase generates real UUID on INSERT
     name,
     style: document.getElementById('ae-style').value,
     date: document.getElementById('ae-date').value || '2026-04-01',
@@ -3498,6 +3602,8 @@ function adminAddEvent() {
     ticket: document.getElementById('ae-ticket').value,
     status: 'approved',
   };
+  events.push(ev);
+  saveEvents(); // saves to Supabase with auto-generated UUID
   renderEvents();
   admToast('Event added ✓');
   ['ae-name','ae-date','ae-time','ae-city','ae-venue','ae-promoter','ae-desc','ae-image','ae-ticket'].forEach(id => {
