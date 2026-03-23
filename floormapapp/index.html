@@ -477,6 +477,7 @@ body::after{content:'';position:fixed;inset:0;background-image:url("data:image/s
 .hidden{display:none!important}
 input[type=date]::-webkit-calendar-picker-indicator{filter:invert(.5)}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 
@@ -1500,6 +1501,14 @@ input[type=date]::-webkit-calendar-picker-indicator{filter:invert(.5)}
 
 <script>
 // ══════════════════════════════════════
+// SUPABASE
+// ══════════════════════════════════════
+const _supa = supabase.createClient(
+  'https://jfpikbveabkmgrhpeyxu.supabase.co',
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpmcGlrYnZlYWJrbWdyaHBleXh1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyNTAzMjEsImV4cCI6MjA4OTgyNjMyMX0.PnmU3qNH8hHx2Nk0O7IZSSnhyx4mUchIu7CSuayMUIw'
+);
+
+// ══════════════════════════════════════
 // DATA
 // ══════════════════════════════════════
 
@@ -1626,18 +1635,76 @@ let currentLearnStyle = 'kizomba';
 let currentFindStyle = '';
 let savedEvents = JSON.parse(localStorage.getItem('fm_saved') || '[]');
 let events = loadEvents();
+fetchEventsFromSupabase(); // async: replaces DEFAULT_EVENTS once Supabase responds
 let contacts = JSON.parse(localStorage.getItem('fm_contacts') || '[]');
 let pending = JSON.parse(localStorage.getItem('fm_pending') || '[]');
 let verifyAnswer = 0;
 let verifyNum1 = 0, verifyNum2 = 0;
 
 function loadEvents() {
-  const stored = localStorage.getItem('fm_events');
-  if (stored) return JSON.parse(stored);
-  localStorage.setItem('fm_events', JSON.stringify(DEFAULT_EVENTS));
-  return DEFAULT_EVENTS;
+  // Returns DEFAULT_EVENTS synchronously so the page can boot immediately.
+  // fetchEventsFromSupabase() runs right after and replaces the array + re-renders.
+  return [...DEFAULT_EVENTS];
 }
-function saveEvents() { localStorage.setItem('fm_events', JSON.stringify(events)); }
+
+async function fetchEventsFromSupabase() {
+  try {
+    const { data, error } = await _supa
+      .from('events')
+      .select('*')
+      .eq('status', 'approved')
+      .order('date', { ascending: true });
+    if (error) throw error;
+    if (data && data.length) {
+      // Map Supabase column names → internal field names
+      events = data.map(row => ({
+        id:        row.id,
+        name:      row.name,
+        style:     row.style,
+        date:      row.date,
+        time:      row.time,
+        city:      row.city,
+        venue:     row.venue,
+        address:   row.address,
+        promoter:  row.promoter,
+        desc:      row.description,   // description → desc
+        ticket:    row.ticket,
+        fb:        row.fb,
+        status:    row.status,
+        image:     row.image || '',
+      }));
+      renderEvents();
+      renderAdmEvents();
+    }
+  } catch (err) {
+    console.warn('FloorMap: Supabase fetchEvents failed, using defaults.', err);
+  }
+}
+
+async function saveEvents() {
+  // Upsert the full events array to Supabase
+  try {
+    const rows = events.map(ev => ({
+      id:          ev.id,
+      name:        ev.name,
+      style:       ev.style,
+      date:        ev.date,
+      time:        ev.time,
+      city:        ev.city,
+      venue:       ev.venue,
+      address:     ev.address,
+      promoter:    ev.promoter,
+      description: ev.desc,           // desc → description
+      ticket:      ev.ticket,
+      fb:          ev.fb,
+      status:      ev.status || 'approved',
+    }));
+    const { error } = await _supa.from('events').upsert(rows, { onConflict: 'id' });
+    if (error) throw error;
+  } catch (err) {
+    console.error('FloorMap: Supabase saveEvents failed.', err);
+  }
+}
 
 // ══ REVIEWS ══
 // ══ REVIEWS ══
@@ -1853,21 +1920,10 @@ function loginToast(msg) {
   t._timer = setTimeout(() => { t.style.opacity = '0'; }, 2500);
 }
 
-// ══ LOGIN LOGO TRIPLE TAP (login screen → admin bypass) ══
+// ══ LOGIN LOGO TAP ══
 let loginTapCount = 0, loginTapTimer = null;
 function handleLoginLogoTap() {
-  loginTapCount++;
-  clearTimeout(loginTapTimer);
-  if (loginTapCount === 3) {
-    loginTapCount = 0;
-    // Admin bypass — skip login entirely
-    localStorage.setItem('fm_currentUser', JSON.stringify({email:'admin@floormap.nl', name:'Admin'}));
-    doLogin();
-    // Open admin panel after app loads
-    setTimeout(() => openAdmin(), 300);
-    return;
-  }
-  loginTapTimer = setTimeout(() => { loginTapCount = 0; }, 500);
+  // Triple-tap admin bypass removed for security
 }
 
 function doSignIn() {
@@ -3388,8 +3444,8 @@ function renderAdmPending() {
 }
 function approveEvent(i) {
   const ev = {...pending[i]};
-  delete ev.status;
-  ev.id = 'a' + Date.now();
+  ev.status = 'approved';
+  delete ev.id; // Let Supabase generate a real UUID — fake ids cause silent insert failures
   events.push(ev);
   pending.splice(i, 1);
   saveEvents();
@@ -3399,9 +3455,7 @@ function approveEvent(i) {
   const b = document.getElementById('pendingBadge');
   if (b) b.textContent = pending.length || '';
   admToast('✓ Event approved & live!');
-
-  // Store the new event id so we can scroll to it when admin closes
-  window._lastApprovedEventId = ev.id;
+  window._lastApprovedEventId = null;
 }
 function rejectEvent(i) {
   if (!confirm('Reject and delete this submission?')) return;
@@ -3442,9 +3496,8 @@ function adminAddEvent() {
     promoter: document.getElementById('ae-promoter').value,
     image: document.getElementById('ae-image').value,
     ticket: document.getElementById('ae-ticket').value,
+    status: 'approved',
   };
-  events.push(ev);
-  saveEvents();
   renderEvents();
   admToast('Event added ✓');
   ['ae-name','ae-date','ae-time','ae-city','ae-venue','ae-promoter','ae-desc','ae-image','ae-ticket'].forEach(id => {
